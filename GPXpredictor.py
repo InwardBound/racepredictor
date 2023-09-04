@@ -123,7 +123,7 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                     else:
                         routeguess.tracks[0].segments[0].points.extend(segmentinfo.tracks[0].segments[0].points)
    #remove likely errors for gpx
-    routeguess = filter_gpx(routeguess,0,30)
+    routeguess = filter_gpx(routeguess,0.1,21) # topspeed faster than a 2hr marathon
     for track in routeguess.tracks:
         for segment in track.segments:
             for i in range(len(segment.points)-1):
@@ -178,7 +178,7 @@ race_data = response.json()
 teamtimedict={}
 teams = race_data.get("teams", [])
 aedt = pytz.timezone('Australia/Sydney')
-start_time_aedt = datetime(2022, 10, 30, 7, 00)  # need to make to drop time + scout time to remove idle time
+start_time_aedt = datetime(2022, 10, 30, 6, 30)  # need to make to drop time + scout time to remove idle time
 end_time_aedt = datetime(2022, 10, 30, 8, 38)  # will be unnecessary as with cut to current time
 start_time_utc = start_time_aedt - timedelta(hours=11)
 end_time_utc = end_time_aedt - timedelta(hours=11)
@@ -187,10 +187,8 @@ for team_data in teams:
     if "DRIVER" not in team_name:
         # Extract the point data for this team
         points_data = team_data.get('positions', [])
-        # Convert the point data to a GPX object with the team's name as the track name
         track_gpx = points_to_gpx(points_data, team_name)
         track_gpx = filter_points_by_time(track_gpx, start_time_utc, end_time_utc)
-        #test cut the gpx we will go from drop to 8:38am
         teamtimeguess=timeguess(track_gpx,routegpx,team_name)
         teamtimedict[team_name] = teamtimeguess
 with open('2022resultsguess.csv', 'w') as predictions:
