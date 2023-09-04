@@ -14,8 +14,6 @@ def SpdtoGAP(speed, grade):
 def GAPtoSPD(GAP, grade):
     divisor = 14.636 * grade * grade + 2.8609 * grade + 1
     return (GAP/divisor)
-
-
 def points_to_gpx(points_data, track_name):
     gpx = gpxpy.gpx.GPX()
     # Create a track with the specified name
@@ -32,6 +30,34 @@ def points_to_gpx(points_data, track_name):
         gpx_point = gpxpy.gpx.GPXTrackPoint(lat, lon, elevation=elevation, time=time)
         segment.points.append(gpx_point)
     return gpx
+def filter_gpx(gpx, min_speed_kmph, max_speed_kmph): #removes teleporting maybe bussing too
+    filtered_gpx = gpxpy.gpx.GPX()  # Create a new GPX object for filtered data
+    for track in gpx.tracks:
+        for segment in track.segments:
+            filtered_segment = gpxpy.gpx.GPXTrackSegment()  # Create a new track segment for filtered data
+            previous_point = None
+            for point in segment.points:
+                if previous_point is None:
+                    filtered_segment.points.append(point)
+                    previous_point = point
+                    continue
+
+                # Check if required data for speed calculation is available
+                if point.time and previous_point.time:
+                    if point.distance_3d(previous_point) > 0:
+                        # Calculate speed between two points (in km/h)
+                        speed_kmph = point.distance_3d(previous_point) / (point.time - previous_point.time).total_seconds() * 3.6  # Convert m/s to km/h
+                        if min_speed_kmph <= speed_kmph <= max_speed_kmph:
+                            filtered_segment.points.append(point)
+                previous_point = point
+            if filtered_segment.points:
+                filtered_track = gpxpy.gpx.GPXTrack()  # Create a new track for filtered data
+                filtered_track.segments.append(filtered_segment)
+                filtered_gpx.tracks.append(filtered_track)
+
+    return filtered_gpx
+
+    return filtered_gpx
 routegpx = gpxpy.gpx.GPX() # a store of all possible routes
 folder_path=os.path.join(os.getcwd(),"routes")#lets get a routes folder
 timeguesses={}
@@ -63,14 +89,17 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                     locinfoi1= routegpx.get_nearest_location(point_i1)  # get the point and track we closest to based on the second point (need to probably improve this algo)
                     locpointi1 = locinfoi1.point_no
                     loctracki1 = locinfoi1.track_no
-                    locpointi = routegpx.tracks[loctracki1].get_nearest_location(point_i).point_no  # get the point and track we closest to based on the second point (need to probably improve this algo)
+                    locinfoi = routegpx.tracks[loctracki1].get_nearest_location(point_i)
+                    locpointi = locinfoi.point_no  # get the point and track we closest to based on the second point (need to probably improve this algo)
                     segmentinfo = gpxpy.gpx.GPX()
                     segmentinfo.tracks.append(routegpx.tracks[loctracki1].clone())
-                    if locpointi1 >= locpointi:#check which way, we need to add a check based on teh distance between the points and the route to access wheteher to do this
-                        segmentinfo.tracks[0].segments[0].points = [point_i] + routegpx.tracks[loctracki1].segments[0].points[locpointi:locpointi1-1] +[point_i1]
+                    if point_i.distance_3d(locinfoi.location) > 500 or point_i1.distance_3d(locinfoi1.location) > 500: # if corrected route more than 500m from one point don't correct
+                        segmentinfo.tracks[0].segments[0].points = [point_i, point_i1]
+                    elif locpointi1 >= locpointi:
+                        segmentinfo.tracks[0].segments[0].points = [point_i]+routegpx.tracks[loctracki1].segments[0].points[locpointi:locpointi1+1]+[point_i1]
                     else:
-                        segmentinfo.tracks[0].segments[0].points = [point_i] + routegpx.tracks[loctracki1].segments[0].points[                                                        locpointi:locpointi1 - 1:-1] + [point_i1]
-                    speed = segmentinfo.length_2d()/time #need to gap adjust
+                        segmentinfo.tracks[0].segments[0].points =[point_i]+routegpx.tracks[loctracki1].segments[0].points[locpointi:locpointi1+1:-1]+[point_i1]
+                    speed = segmentinfo.length_3d()/time #need to gap adjust
                 else:
                     speed = 0
                 if speed!=0:#pointless if same point
@@ -81,9 +110,7 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                             for p in s.points:
                                 if previous_time is not None and previous_point is not None:
                                     # Calculate distance between previous point and current point
-                                    distance = previous_point.distance_2d(p)
-                                    #AdjustforGAP seemingly not needed???
-                                    vert = p.elevation - previous_point.elevation
+                                    distance = previous_point.distance_3d(p)
                                     # Calculate elapsed time between previous point and current point
                                     elapsed_time = timedelta(seconds=distance/speed)
                                     # Set the time of the current point based on the elapsed time
@@ -95,6 +122,8 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                         routeguess.tracks.append(segmentinfo.tracks[0])
                     else:
                         routeguess.tracks[0].segments[0].points.extend(segmentinfo.tracks[0].segments[0].points)
+   #remove likely errors for gpx
+    routeguess = filter_gpx(routeguess,0,30)
     for track in routeguess.tracks:
         for segment in track.segments:
             for i in range(len(segment.points)-1):
@@ -103,7 +132,7 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                 speed = point_i.speed_between(point_i1)
                 time = point_i.time_difference(point_i1)
                 vert = point_i1.elevation - point_i.elevation
-                dist = point_i.distance_2d(point_i1)
+                dist = point_i.distance_3d(point_i1)
                 if dist !=0:
                     grade=vert/dist
                     GAPspeed = SpdtoGAP(speed, grade)
