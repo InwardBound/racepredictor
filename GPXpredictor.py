@@ -139,29 +139,10 @@ def infer_speed(gpx):
     for track in gpx.tracks:
         for segment in track.segments:
             previous_point = None
-
             for point in segment.points:
                 if previous_point is not None:
-                    # Calculate time difference between current point and previous point
-                    time_difference = point.time - previous_point.time
-
-                    # Calculate distance between current point and previous point
-                    distance_meters = previous_point.distance_2d(point)
-
-                    # Calculate speed in m/s
-                    if time_difference.total_seconds() > 0:
-                        speed_mps = distance_meters / time_difference.total_seconds()
-                    else:
-                        speed_mps = 0
-
-                    # Convert speed to km/h
-                    speed_kmph = speed_mps * 3.6
-
-                    # Update the current point with the inferred speed
-                    point.speed = speed_kmph
-
+                    previous_point.speed = previous_point.speed_between(point)
                 previous_point = point
-
     return gpx
 def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and drop time info to cull bus time from tracker data (and maybe finish time too)
     gapdf = pd.DataFrame(columns=['Time', "GAP"])
