@@ -30,6 +30,27 @@ def points_to_gpx(points_data, track_name):
         gpx_point = gpxpy.gpx.GPXTrackPoint(lat, lon, elevation=elevation, time=time)
         segment.points.append(gpx_point)
     return gpx
+def gpx_to_json(gpx, team_name):#we'll  need the uno reverse card to make it go backwards I porbably should have worked just in json but had this code already so just bodged it
+    json_data = {
+        "name": team_name,
+        "positions": [],  # Initialize positions if not a guess
+    }
+    for track in gpx.tracks:
+        for segment in track.segments:
+            for point in segment.points:
+                json_point = {
+                    "sogKmph": point.speed * 3.6 if point.speed is not None else None,  # Convert m/s to km/h
+                    "txAt": point.time.isoformat() + "Z",  # Convert to ISO 8601 format
+                    "gpsAtMillis": point.time.timestamp() * 1000,  # Convert to milliseconds
+                    "altitude": point.elevation,
+                    "latitude": point.latitude,
+                    "longitude": point.longitude
+                    # Add other attributes as needed
+                }
+                json_data["positions"].append(json_point)
+
+
+    return json_data
 def filter_gpx(gpx, min_speed_kmph, max_speed_kmph): #removes teleporting maybe bussing too
     filtered_gpx = gpxpy.gpx.GPX()  # Create a new GPX object for filtered data
     for track in gpx.tracks:
@@ -37,18 +58,14 @@ def filter_gpx(gpx, min_speed_kmph, max_speed_kmph): #removes teleporting maybe 
             filtered_segment = gpxpy.gpx.GPXTrackSegment()  # Create a new track segment for filtered data
             previous_point = None
             for point in segment.points:
-                if previous_point is None:
-                    filtered_segment.points.append(point)
-                    previous_point = point
-                    continue
-
-                # Check if required data for speed calculation is available
-                if point.time and previous_point.time:
-                    if point.distance_3d(previous_point) > 0:
-                        # Calculate speed between two points (in km/h)
-                        speed_kmph = point.distance_3d(previous_point) / (point.time - previous_point.time).total_seconds() * 3.6  # Convert m/s to km/h
-                        if min_speed_kmph <= speed_kmph <= max_speed_kmph:
-                            filtered_segment.points.append(point)
+                if previous_point is not None:
+                    # Check if required data for speed calculation is available
+                    if point.time and previous_point.time:
+                        if point.distance_3d(previous_point) > 0:
+                            # Calculate speed between two points (in km/h)
+                            speed_kmph = point.distance_3d(previous_point) / (point.time - previous_point.time).total_seconds() * 3.6  # Convert m/s to km/h
+                            if min_speed_kmph <= speed_kmph <= max_speed_kmph:
+                                filtered_segment.points.append(previous_point)
                 previous_point = point
             if filtered_segment.points:
                 filtered_track = gpxpy.gpx.GPXTrack()  # Create a new track for filtered data
@@ -56,6 +73,49 @@ def filter_gpx(gpx, min_speed_kmph, max_speed_kmph): #removes teleporting maybe 
                 filtered_gpx.tracks.append(filtered_track)
 
     return filtered_gpx
+def distance_filter(gpx, max_gap_distance_meters):#this basic pairwise approach ain't good enough
+    filtered_gpx = gpxpy.gpx.GPX()  # Create a new GPX object for filtered data
+    for track in gpx.tracks:
+        for segment in track.segments:
+            filtered_segment = gpxpy.gpx.GPXTrackSegment()  # Create a new track segment for filtered data
+            previous_point = None
+
+            for point in segment.points:
+                if previous_point is not None:
+                    # Calculate distance between current point and previous point
+                    distance_meters = point.distance_3d(previous_point)
+
+                    # Check if the distance is less than the maximum allowed gap
+                    if distance_meters <= max_gap_distance_meters:
+                        filtered_segment.points.append(point)
+
+                previous_point = point
+
+            if filtered_segment.points:
+                filtered_track = gpxpy.gpx.GPXTrack()  # Create a new track for filtered data
+                filtered_track.segments.append(filtered_segment)
+                filtered_gpx.tracks.append(filtered_track)
+    return filtered_gpx
+
+def distance_filter_with_future_points(gpx, max_gap_distance_meters, n): # it's still pairwise but dtermines how far you look for the pair
+    filtered_gpx = gpxpy.gpx.GPX()  # Create a new GPX object for filtered data
+    for track in gpx.tracks:
+        for segment in track.segments:
+            filtered_segment = gpxpy.gpx.GPXTrackSegment()  # Create a new track segment for filtered data
+            i = 0  # Index of the current point
+            while i < len(segment.points):
+                point = segment.points[i]
+                future_point = segment.points[min(i+n,len(segment.points)-1)]
+                if point.distance_3d(future_point)<max_gap_distance_meters:
+                    filtered_segment.points.append(point)
+                    i += 1  # Move to the next point
+                else:
+                    # Skip points with no future points within the specified distance
+                    i += n
+            if filtered_segment.points:
+                filtered_track = gpxpy.gpx.GPXTrack()  # Create a new track for filtered data
+                filtered_track.segments.append(filtered_segment)
+                filtered_gpx.tracks.append(filtered_track)
 
     return filtered_gpx
 routegpx = gpxpy.gpx.GPX() # a store of all possible routes
@@ -78,6 +138,7 @@ def filter_points_by_time(gpx, start_time_utc, end_time_utc):
 def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and drop time info to cull bus time from tracker data (and maybe finish time too)
     gapdf = pd.DataFrame(columns=['Time', "GAP"])
     gpx = teaminfo
+
     routeguess = gpxpy.gpx.GPX() #correctedroute
     for track in gpx.tracks:#make assumptions about intermediate points travelled to by chucking in route data between the points provided
         for segment in track.segments:
@@ -93,7 +154,7 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                     locpointi = locinfoi.point_no  # get the point and track we closest to based on the second point (need to probably improve this algo)
                     segmentinfo = gpxpy.gpx.GPX()
                     segmentinfo.tracks.append(routegpx.tracks[loctracki1].clone())
-                    if point_i.distance_3d(locinfoi.location) > 500 or point_i1.distance_3d(locinfoi1.location) > 500: # if corrected route more than 500m from one point don't correct
+                    if point_i.distance_3d(locinfoi.location) > 700 or point_i1.distance_3d(locinfoi1.location) > 700: # if corrected route more than 500m from one point don't correct
                         segmentinfo.tracks[0].segments[0].points = [point_i, point_i1]
                     elif locpointi1 >= locpointi:
                         segmentinfo.tracks[0].segments[0].points = [point_i]+routegpx.tracks[loctracki1].segments[0].points[locpointi:locpointi1+1]+[point_i1]
@@ -123,7 +184,8 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                     else:
                         routeguess.tracks[0].segments[0].points.extend(segmentinfo.tracks[0].segments[0].points)
    #remove likely errors for gpx
-    routeguess = filter_gpx(routeguess,0.1,21) # topspeed faster than a 2hr marathon
+    routeguess = filter_gpx(routeguess,4,20) # topspeed faster than a 2hr marathon
+    routeguess = distance_filter_with_future_points(routeguess,2000,10)#try get rid of teh bus trip automagically done after the speed correction as that should remove most bus travel bits
     for track in routeguess.tracks:
         for segment in track.segments:
             for i in range(len(segment.points)-1):
@@ -170,18 +232,19 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
     file_path = os.path.join(folder_path, f"{teamname}.gpx")
     with open(file_path,'w') as f:#outputs corrected/predictive gpx by team_name
         f.write(outgpx)
-    return routeguess.tracks[-1].segments[-1].points[-1].time + timedelta(hours=11) #convert back to aedt
+    return [routeguess.tracks[-1].segments[-1].points[-1].time + timedelta(hours=11),routeguess] #convert back to aedt
 
-json_url = "https://yb.tl/API3/Race/inwardbound2022/GetPositions?t=0"
+json_url = "https://yb.tl/API3/Race/inwardbound2022/GetPositions?t=0"#change this to whatever the url is
 response = requests.get(json_url)
 race_data = response.json()
-teamtimedict={}
-teams = race_data.get("teams", [])
-aedt = pytz.timezone('Australia/Sydney')
-start_time_aedt = datetime(2022, 10, 30, 6, 30)  # need to make to drop time + scout time to remove idle time
-end_time_aedt = datetime(2022, 10, 30, 8, 38)  # will be unnecessary as with cut to current time
+#this time filterinbg is just to tets predictiveness
+start_time_aedt = datetime(2022, 10, 29, 19, 30)  # need to make to drop time + scout time to remove idle time
+end_time_aedt = datetime(2022, 10, 30, 8, 8)  # will be unnecessary as with cut to current time
 start_time_utc = start_time_aedt - timedelta(hours=11)
 end_time_utc = end_time_aedt - timedelta(hours=11)
+teamtimedict={}
+teams_data = []
+teams = race_data.get("teams", [])
 for team_data in teams:
     team_name = team_data.get('name')
     if "DRIVER" not in team_name:
@@ -189,9 +252,18 @@ for team_data in teams:
         points_data = team_data.get('positions', [])
         track_gpx = points_to_gpx(points_data, team_name)
         track_gpx = filter_points_by_time(track_gpx, start_time_utc, end_time_utc)
-        teamtimeguess=timeguess(track_gpx,routegpx,team_name)
-        teamtimedict[team_name] = teamtimeguess
+        teamguess=timeguess(track_gpx,routegpx,team_name)
+        teamtimedict[team_name] = teamguess[0]
+        guess_json = gpx_to_json(teamguess[1],team_name)
+        teams_data.append(guess_json)
 with open('2022resultsguess.csv', 'w') as predictions:
     writer = csv.writer(predictions)
     writer.writerow(teamtimedict.keys())
     writer.writerow(teamtimedict.values())
+final_json = {
+    "raceUrl": race_data.get("raceUrl"),  # Make whateever the race info is
+
+    "teams": teams_data
+}
+with open('race_data.json', 'w') as json_file:
+    json.dump(final_json, json_file,indent=4)
