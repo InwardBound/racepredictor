@@ -135,10 +135,37 @@ def filter_points_by_time(gpx, start_time_utc, end_time_utc):
         for segment in track.segments:
             segment.points = [point for point in segment.points if start_time_utc < point.time < end_time_utc]
     return gpx
+def infer_speed(gpx):
+    for track in gpx.tracks:
+        for segment in track.segments:
+            previous_point = None
+
+            for point in segment.points:
+                if previous_point is not None:
+                    # Calculate time difference between current point and previous point
+                    time_difference = point.time - previous_point.time
+
+                    # Calculate distance between current point and previous point
+                    distance_meters = previous_point.distance_2d(point)
+
+                    # Calculate speed in m/s
+                    if time_difference.total_seconds() > 0:
+                        speed_mps = distance_meters / time_difference.total_seconds()
+                    else:
+                        speed_mps = 0
+
+                    # Convert speed to km/h
+                    speed_kmph = speed_mps * 3.6
+
+                    # Update the current point with the inferred speed
+                    point.speed = speed_kmph
+
+                previous_point = point
+
+    return gpx
 def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and drop time info to cull bus time from tracker data (and maybe finish time too)
     gapdf = pd.DataFrame(columns=['Time', "GAP"])
     gpx = teaminfo
-
     routeguess = gpxpy.gpx.GPX() #correctedroute
     for track in gpx.tracks:#make assumptions about intermediate points travelled to by chucking in route data between the points provided
         for segment in track.segments:
@@ -147,19 +174,19 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                 point_i1 = segment.points[i + 1]
                 time = point_i.time_difference(point_i1)
                 if time != 0:
-                    locinfoi1= routegpx.get_nearest_location(point_i1)  # get the point and track we closest to based on the second point (need to probably improve this algo)
+                    locinfoi1= routeinfo.get_nearest_location(point_i1)  # get the point and track we closest to based on the second point (need to probably improve this algo)
                     locpointi1 = locinfoi1.point_no
                     loctracki1 = locinfoi1.track_no
-                    locinfoi = routegpx.tracks[loctracki1].get_nearest_location(point_i)
+                    locinfoi = routeinfo.tracks[loctracki1].get_nearest_location(point_i)
                     locpointi = locinfoi.point_no  # get the point and track we closest to based on the second point (need to probably improve this algo)
                     segmentinfo = gpxpy.gpx.GPX()
-                    segmentinfo.tracks.append(routegpx.tracks[loctracki1].clone())
+                    segmentinfo.tracks.append(routeinfo.tracks[loctracki1].clone())
                     if point_i.distance_3d(locinfoi.location) > 700 or point_i1.distance_3d(locinfoi1.location) > 700: # if corrected route more than 500m from one point don't correct
                         segmentinfo.tracks[0].segments[0].points = [point_i, point_i1]
                     elif locpointi1 >= locpointi:
-                        segmentinfo.tracks[0].segments[0].points = [point_i]+routegpx.tracks[loctracki1].segments[0].points[locpointi:locpointi1+1]+[point_i1]
+                        segmentinfo.tracks[0].segments[0].points = [point_i]+routeinfo.tracks[loctracki1].segments[0].points[locpointi:locpointi1+1]+[point_i1]
                     else:
-                        segmentinfo.tracks[0].segments[0].points =[point_i]+routegpx.tracks[loctracki1].segments[0].points[locpointi:locpointi1+1:-1]+[point_i1]
+                        segmentinfo.tracks[0].segments[0].points =[point_i]+routeinfo.tracks[loctracki1].segments[0].points[locpointi:locpointi1+1:-1]+[point_i1]
                     speed = segmentinfo.length_3d()/time #need to gap adjust
                 else:
                     speed = 0
@@ -203,12 +230,12 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                 if i == len(segment.points)-2:
                     endpoint = point_i1 #where we end and guess what route we are on from
     NetGAP=average(gapdf['GAP'], weights = gapdf['Time'])
-    endpointinfo=routegpx.get_nearest_location(endpoint) #get the point we closest to
+    endpointinfo=routeinfo.get_nearest_location(endpoint) #get the point we closest to
     locpoint = endpointinfo.point_no #pointinfo
     loctrack =endpointinfo.track_no #trackchooser (may need to do some priority thing here)
     pathtofinish = gpxpy.gpx.GPX()
-    pathtofinish.tracks.append(routegpx.tracks[loctrack].clone())
-    pathtofinish.tracks[0].segments[0].points = [endpoint]+routegpx.tracks[loctrack].segments[0].points[locpoint:]
+    pathtofinish.tracks.append(routeinfo.tracks[loctrack].clone())
+    pathtofinish.tracks[0].segments[0].points = [endpoint]+routeinfo.tracks[loctrack].segments[0].points[locpoint:]
     nettime = routeguess.get_duration()
     for track in pathtofinish.tracks:
         for segment in track.segments:
