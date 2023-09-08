@@ -235,6 +235,7 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                 previous_point = point_i
     for track in pathtofinish.tracks:
        routeguess.tracks.append(track)
+    routeguess = infer_speed(routeguess)
     outgpx=routeguess.to_xml()
     folder_path = os.path.join(os.getcwd(), "teams")  # lets get a routes folder
     file_path = os.path.join(folder_path, f"{teamname}.gpx")
