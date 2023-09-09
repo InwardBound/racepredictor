@@ -148,6 +148,13 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
     gapdf = pd.DataFrame(columns=['Time', "GAP"])
     gpx = teaminfo
     routeguess = gpxpy.gpx.GPX() #correctedroute
+    endpoint = routeinfo.tracks[0].segments[-1].points[-1] #get the endpoint make sure first route has it
+    eproutes = gpxpy.gpx.GPX()#make list of routes that go to endpoint as some tracks will merely be different ways between other points
+    for track in routeinfo.tracks:
+        trackep=track.segments[-1].points[-1]
+        distance_to_endpoint = endpoint.distance_3d(trackep)
+        if distance_to_endpoint < 300:#allow some buffer
+            eproutes.tracks.append(track)
     for track in gpx.tracks:#make assumptions about intermediate points travelled to by chucking in route data between the points provided
         for segment in track.segments:
             for i in range(len(segment.points) - 1):
@@ -192,7 +199,7 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                     else:
                         routeguess.tracks[0].segments[0].points.extend(segmentinfo.tracks[0].segments[0].points)
    #remove likely errors for gpx
-    routeguess = filter_gpx(routeguess,4,20) # topspeed faster than a 2hr marathon
+    routeguess = filter_gpx(routeguess,1,20) # topspeed faster than a 2hr marathon
     routeguess = distance_filter_with_future_points(routeguess,2000,10)#try get rid of teh bus trip automagically done after the speed correction as that should remove most bus travel bits
     for track in routeguess.tracks:
         for segment in track.segments:
@@ -213,10 +220,19 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
     NetGAP=average(gapdf['GAP'], weights = gapdf['Time'])
     endpointinfo=routeinfo.get_nearest_location(endpoint) #get the point we closest to
     locpoint = endpointinfo.point_no #pointinfo
+    locsegment = endpointinfo.segment_no
     loctrack =endpointinfo.track_no #trackchooser (may need to do some priority thing here)
     pathtofinish = gpxpy.gpx.GPX()
     pathtofinish.tracks.append(routeinfo.tracks[loctrack].clone())
-    pathtofinish.tracks[0].segments[0].points = [endpoint]+routeinfo.tracks[loctrack].segments[0].points[locpoint:]
+    pathtofinish.tracks[0].segments[0].points = [endpoint]+routeinfo.tracks[loctrack].segments[locsegment].points[locpoint:]
+    pathend=pathtofinish.tracks[0].segments[-1].points[-1]
+    if pathend.distance_3d(endpoint) > 300:#if route doesn't go to endpoint repeat merging with a route that does
+        endpointinfo = eproutes.get_nearest_location(pathend)  # get the point we closest to
+        locpoint = endpointinfo.point_no# pointinfo
+        locsegment = endpointinfo.segment_no
+        loctrack = endpointinfo.track_no
+        pathtofinish.tracks[0].segments[0].points += eproutes.tracks[loctrack].segments[locsegment].points[locpoint:]
+
     nettime = routeguess.get_duration()
     for track in pathtofinish.tracks:
         for segment in track.segments:
