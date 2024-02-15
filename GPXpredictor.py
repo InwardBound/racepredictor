@@ -3,11 +3,15 @@ import os
 import gpxpy.gpx
 import pandas as pd
 from numpy import average
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta,timezone
 import json
 import pytz
 import csv
 import requests
+import re
+import xlsxwriter
+def remove_numbers(input_string):
+    return re.sub(r'\d', '', input_string)
 def SpdtoGAP(speed, grade):
     multiplier = 14.636*grade*grade+2.8609*grade+1
     return (speed*multiplier)
@@ -118,22 +122,13 @@ def distance_filter_with_future_points(gpx, max_gap_distance_meters, n): # it's 
                 filtered_gpx.tracks.append(filtered_track)
 
     return filtered_gpx
-routegpx = gpxpy.gpx.GPX() # a store of all possible routes
-folder_path=os.path.join(os.getcwd(),"routes")#lets get a routes folder
-timeguesses={}
-for file in os.listdir(folder_path):
-    if file.endswith(".gpx"):
-        file_path = os.path.join(folder_path, file)
-        with open(file_path, "r") as f:
-            gpx_file = gpxpy.parse(f)
-        # add each track in the file to the main GPX object
-        for track in gpx_file.tracks:
-            routegpx.tracks.append(track)
+
+
 # Function to filter GPX points within a specific time range
-def filter_points_by_time(gpx, start_time_utc, end_time_utc):
+def filter_points_by_time(gpx, start_time_utc):
     for track in gpx.tracks:
         for segment in track.segments:
-            segment.points = [point for point in segment.points if start_time_utc < point.time < end_time_utc]
+            segment.points = [point for point in segment.points if start_time_utc < point.time]
     return gpx
 def infer_speed(gpx):
     for track in gpx.tracks:
@@ -169,7 +164,7 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                     locpointi = locinfoi.point_no  # get the point and track we closest to based on the second point (need to probably improve this algo)
                     segmentinfo = gpxpy.gpx.GPX()
                     segmentinfo.tracks.append(routeinfo.tracks[loctracki1].clone())
-                    if point_i.distance_3d(locinfoi.location) > 700 or point_i1.distance_3d(locinfoi1.location) > 700: # if corrected route more than 500m from one point don't correct
+                    if point_i.distance_3d(locinfoi.location) > 1000 or point_i1.distance_3d(locinfoi1.location) > 1000: # if corrected route more than 500m from one point don't correct
                         segmentinfo.tracks[0].segments[0].points = [point_i, point_i1]
                     elif locpointi1 >= locpointi:
                         segmentinfo.tracks[0].segments[0].points = [point_i]+routeinfo.tracks[loctracki1].segments[0].points[locpointi:locpointi1+1]+[point_i1]
@@ -232,8 +227,8 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
         locsegment = endpointinfo.segment_no
         loctrack = endpointinfo.track_no
         pathtofinish.tracks[0].segments[0].points += eproutes.tracks[loctrack].segments[locsegment].points[locpoint:]
-
     nettime = routeguess.get_duration()
+    print(nettime)
     for track in pathtofinish.tracks:
         for segment in track.segments:
             previous_time = None
@@ -251,44 +246,122 @@ def timeguess(teaminfo, routeinfo, teamname): #need to also add name info and dr
                 previous_point = point_i
     for track in pathtofinish.tracks:
        routeguess.tracks.append(track)
+    lasttime = routeguess.tracks[-1].segments[-1].points[-1].time
+    n = 1
+    while lasttime == None:
+        if len(routeguess.tracks[-1].segments[-1])==0:
+            routeguess.tracks[-1].segments.pop()
+        if len(routeguess.tracks[-1])==0:
+            routeguess.tracks.pop()
+        lasttime = routeguess.tracks[-1].segments[-1].points[-1].time
+
     routeguess = infer_speed(routeguess)
     outgpx=routeguess.to_xml()
     folder_path = os.path.join(os.getcwd(), "teams")  # lets get a routes folder
     file_path = os.path.join(folder_path, f"{teamname}.gpx")
     with open(file_path,'w') as f:#outputs corrected/predictive gpx by team_name
         f.write(outgpx)
-    return [routeguess.tracks[-1].segments[-1].points[-1].time + timedelta(hours=11),routeguess] #convert back to aedt
 
-json_url = "https://yb.tl/API3/Race/inwardbound2022/GetPositions?t=0"#change this to whatever the url is
+    return [lasttime + timedelta(hours=11),routeguess] #convert back to aedt
+
+
+def get_divnumber(input_string):
+    # Use regular expression to find the number at the end of the string
+    match = re.search(r'\d+$', input_string)
+
+    if match:
+        # If a number is found, return it as an integer
+        return int(match.group())
+    else:
+        # If no number is found, return 0
+        return 0
+routegpx = gpxpy.gpx.GPX() # a store of all possible routes
+folder_path=os.path.join(os.getcwd(),"routes")#lets get a routes folder
+timeguesses={}
+json_url = "https://yb.tl/API3/Race/inwardbound_hq2023/GetPositions?t=0"#change this to whatever the url is
 response = requests.get(json_url)
 race_data = response.json()
-#this time filterinbg is just to tets predictiveness
-start_time_aedt = datetime(2022, 10, 29, 19, 30)  # need to make to drop time + scout time to remove idle time
-end_time_aedt = datetime(2022, 10, 30, 8, 8)  # will be unnecessary as with cut to current time
+#this time filterinbg is just to test predictiveness
+start_time_aedt = datetime(2022, 10, 30, 7, 8)  # need to make to drop time + scout time to remove idle time
+end_time_aedt = datetime(2022, 10, 30, 8, 38)  # will be unnecessary as with cut to current time
 start_time_utc = start_time_aedt - timedelta(hours=11)
 end_time_utc = end_time_aedt - timedelta(hours=11)
+droptimes=[datetime(2023, 10, 6, 20, 00),
+datetime(2023, 10, 6, 20, 45),
+datetime(2023, 10, 6, 21, 45),
+datetime(2023, 10, 6, 23, 30),
+datetime(2023, 10, 7, 0, 45),
+datetime(2023, 10, 7, 1, 15),
+datetime(2023, 10, 7, 4, 15)
+]
 teamtimedict={}
 teams_data = []
 teams = race_data.get("teams", [])
 for team_data in teams:
     team_name = team_data.get('name')
-    if "DRIVER" not in team_name:
+    if "Driver" not in team_name and "Rescue" not in team_name and "Committee" not in team_name:
         # Extract the point data for this team
+        routegpx = gpxpy.gpx.GPX()
+        divno=get_divnumber(team_name)
+        filename = str(divno)+".gpx"
+        print(filename)
+        file_path = os.path.join(folder_path, filename)
+        with open(file_path, "r") as f:
+            routegpx = gpxpy.parse(f)
+        start_time_utc= droptimes[divno-1]- timedelta(hours=11)
+        print(team_name)
+        if datetime.now(timezone.utc).replace(tzinfo=None) < start_time_utc+timedelta(minutes=30):
+            print("DIV " +str(divno)+ " has not left yet")
+            continue
+        if divno == 0  or "Division X" in team_name:
+            print(team_name + "has no  divno")
+            continue
         points_data = team_data.get('positions', [])
         track_gpx = points_to_gpx(points_data, team_name)
-        track_gpx = filter_points_by_time(track_gpx, start_time_utc, end_time_utc)
+        track_gpx = filter_points_by_time(track_gpx, start_time_utc-timedelta(minutes=15))
         teamguess=timeguess(track_gpx,routegpx,team_name)
         teamtimedict[team_name] = teamguess[0]
         guess_json = gpx_to_json(teamguess[1],team_name)
         teams_data.append(guess_json)
-with open('2022resultsguess.csv', 'w') as predictions:
-    writer = csv.writer(predictions)
-    writer.writerow(teamtimedict.keys())
-    writer.writerow(teamtimedict.values())
+
+df = pd.DataFrame(list(teamtimedict.items()), columns=['Name', 'Time'])
+
+# Extract the 'Team' names (remove all digits)
+df['Team'] = df['Name'].apply(lambda x: remove_numbers(x))
+# Extract the 'Number' from the 'Name' column
+df['Division'] = df['Name'].str.extract(r'(\d+)').fillna(1).astype(int)
+
+# Group by 'Team' and aggregate 'Time' values into a list
+grouped = df.groupby('Team')['Time'].agg(list).reset_index()
+
+df_pivot = df.pivot(index='Division', columns='Team', values='Time')
+
+# Reset the index to make 'Number' a column
+df_pivot.reset_index(inplace=True)
+
+print(df_pivot)
+with pd.ExcelWriter('racepredictions.xlsx', engine='xlsxwriter') as writer:
+    df_pivot.to_excel(writer, sheet_name='racepredictions', index=False)
+
+    # Get the xlsxwriter workbook and worksheet objects
+    workbook = writer.book
+    worksheet = writer.sheets['racepredictions']
+
+    # Define a custom number format for the 'Division' column (assuming it's in the first column)
+    integer_format = workbook.add_format({'num_format': '0'})
+
+    # Apply the integer format to the 'Division' column
+    worksheet.set_column('A:A', None, integer_format)
+
+    # Define a custom time format for other columns
+    time_format = workbook.add_format({'num_format': 'h:mm:ss AM/PM'})
+
+    # Apply the time format to columns 'B' and 'C'
+    worksheet.set_column('B:W', None, time_format)
 final_json = {
     "raceUrl": race_data.get("raceUrl"),  # Make whateever the race info is
 
     "teams": teams_data
 }
 with open('race_data.json', 'w') as json_file:
-    json.dump(final_json, json_file,indent=4)
+    json.dump(final_json, json_file)
