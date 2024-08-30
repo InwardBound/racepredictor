@@ -14,7 +14,7 @@ def SpdtoGAP(speed, x):
 # Function to parse GPX file
 def parse_gpx(file_path):
     with open(file_path, 'r') as gpx_file:
-        gpx = gpxpy.parse(gpx_file)
+        gpxz = gpxpy.parse(gpx_file)
     points = []
     for track in gpx.tracks:
         for segment in track.segments:

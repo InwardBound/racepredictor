@@ -1,27 +1,19 @@
 import datetime
 import os
-import pickle
-
 import gpxpy.gpx
 import gpxpy
 import pandas as pd
 from numpy import average
 from datetime import datetime, timedelta,timezone
 import json
-import pytz
-import csv
 import requests
 import re
-import xlsxwriter
 import asyncio
 import aiohttp
 import networkx as nx
 import itertools
-import random
-from lxml import etree
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from shapely.geometry import Point, Polygon, LineString
-
+import pickle
 
 def remove_graph_points(graph, areas):
     # Load areas from JSON file
@@ -181,39 +173,59 @@ def GAPtoSPD(GAP, x):
 
 # Asynchronously fetch elevation data in batches with retry mechanism and different User-Agent headers
 async def fetch_elevations_batch_async(points):
+    global elevation_cache  # Declare the global cache
+
     url = "https://api.opentopodata.org/v1/aster30m?locations="
-    batched_points = [points[i:i + 100] for i in range(0, len(points), 100)]
-    all_elevations = []
+    all_elevations = [None] * len(points)
+
     async with aiohttp.ClientSession() as session:
-        for batch in batched_points:
-            if hasattr(points[0], 'latitude'):
-                batch_url = url + "|".join(f"{point.latitude},{point.longitude}" for point in batch)
-            else:
-                batch_url = url + "|".join(f"{lat},{lon}" for lat, lon in batch)
-            print('fetching',batch_url)
-            retry_attempts = 5
-            for attempt in range(retry_attempts):
-                try:
-                    async with session.get(batch_url) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            if "results" in data and len(data["results"]) > 0:
-                                elevations = [result["elevation"] for result in data["results"]]
-                                all_elevations.extend(elevations)
-                                break
+        for i in range(0, len(points), 100):
+            batch = points[i:i + 100]
+            new_points = []
+            new_indices = []
+
+            for idx, point in enumerate(batch):
+                if hasattr(point, 'latitude'):
+                    coord = (point.latitude, point.longitude)
+                else:
+                    coord = point
+
+                if coord in elevation_cache:
+                    all_elevations[i + idx] = elevation_cache[coord]
+                else:
+                    new_points.append(coord)
+                    new_indices.append(i + idx)
+
+            if new_points:
+                batch_url = url + "|".join(f"{lat},{lon}" for lat, lon in new_points)
+                print('fetching', batch_url)
+                retry_attempts = 5
+                for attempt in range(retry_attempts):
+                    try:
+                        async with session.get(batch_url) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                if "results" in data and len(data["results"]) > 0:
+                                    elevations = [result["elevation"] for result in data["results"]]
+                                    for idx, elevation in zip(new_indices, elevations):
+                                        coord = new_points[new_indices.index(idx)]
+                                        elevation_cache[coord] = elevation
+                                        all_elevations[idx] = elevation  # Fix: Directly use `idx` here
+                                    break
+                                else:
+                                    print("No elevation data found in API response")
+                                    break
+                            elif response.status == 429:
+                                print(f"Rate limited by API, retrying in {2 ** attempt} seconds...")
+                                await asyncio.sleep(2 ** attempt)
                             else:
-                                print("No elevation data found in API response")
+                                print(f"Error fetching elevation data: HTTP {response.status}")
                                 break
-                        elif response.status == 429:
-                            print(f"Rate limited by API, retrying in {2 ** attempt} seconds...")
-                            await asyncio.sleep(2 ** attempt)
-                        else:
-                            print(f"Error fetching elevation data: HTTP {response.status}")
-                            break
-                except aiohttp.ClientError as e:
-                    print(f"HTTP request error: {e}")
-                except Exception as e:
-                    print(f"Error fetching elevation data: {e}")
+                    except aiohttp.ClientError as e:
+                        print(f"HTTP request error: {e}")
+                    except Exception as e:
+                        print(f"Error fetching elevation data: {e}")
+
     return all_elevations
 
 
@@ -297,7 +309,6 @@ def gpx_to_json(gpx, team_name, trackerid,id_count):#we'll need the uno reverse 
                 "id": id_count,
                 "trackerID": trackerid,
                 "time": point.time.isoformat() + "Z", # Convert to ISO 8601 format
-                "alt": point.elevation,
                 "lat": point.latitude,
                 "long": point.longitude
                 # Add other attributes as needed
@@ -434,7 +445,7 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
                     GAPspeed = SpdtoGAP(speed, max(min(grade,.3),-.3))#limits grade to .3 as gap starts go weird when really steep
                     inputdf = [time, GAPspeed, timecount]
                     gapdf.loc[len(gapdf)] = inputdf
-                if point_i1.distance_2d(endpoint) < 300:
+                if point_i1.distance_2d(endpoint) < 500:
                     currentpointinfo = routeguess.get_nearest_location(point_i1)
                     locpoint = currentpointinfo.point_no
                     locsegment = currentpointinfo.segment_no
@@ -444,11 +455,8 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
                     finishedroute.tracks[-1].segments = finishedroute.tracks[-1].segments[:locsegment + 1]
                     finishedroute.tracks[-1].segments[-1].points = finishedroute.tracks[-1].segments[-1].points[:locpoint + 1]
                     lasttime = point_i1.time
-                    folderpath = os.path.join(os.getcwd(), "teams")
-                    filepath = os.path.join(folderpath, teamname + "(finished).gpx")
-                    with open(filepath, "w") as f:
-                        f.write(finishedroute.to_xml())
-                    return [lasttime + timedelta(hours=11),finishedroute]  # Return the complete predicted route as GPX
+                    finishedroute.simplify()
+                    return [lasttime,finishedroute]  # Return the complete predicted route as GPX
     currentpoint = routeguess.tracks[-1].segments[-1].points[-1]
     recentdf = gapdf[gapdf['Duration'] > max(gapdf['Duration']) - 7200]#only consider most recent 2hrs of running
     NetGAP = average(recentdf['GAP'], weights=recentdf['Time'])
@@ -492,11 +500,9 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
         lasttime = routeguess.tracks[-1].segments[-1].points[-1].time
 
     routeguess = infer_speed(routeguess)
-    folderpath = os.path.join(os.getcwd(), "teams")
-    filepath = os.path.join(folderpath, teamname+".gpx")
-    with open(filepath, "w") as f:
-        f.write(routeguess.to_xml())
-    return [lasttime + timedelta(hours=11),routeguess] #convert back to aedt
+    routeguess.simplify()
+    routeguess.simplify()
+    return [lasttime,routeguess] #convert back to aedt
 
 
 def get_divnumber(input_string):
@@ -511,40 +517,46 @@ def get_divnumber(input_string):
         return 0
 
 
-async def main():
-    graphcache='graph.gexf'
-    gpxcache = 'routes.gpx'
-    endpoint = gpxpy.gpx.GPXTrackPoint(latitude=-35.474536, longitude=148.275841,elevation=393)
-    #endpoint = gpxpy.gpx.GPXTrackPoint(latitude=-35.70982, longitude=150.250498,elevation=2) 2022 ep
-    folder_path = os.path.join(os.getcwd(), "routes")
-    file_path = os.path.join(folder_path, "0.gpx")
-    with open(file_path, "r") as f:
+async def main(race_slug,lat,long,alt):
+    global elevation_cache
+    elevation_cache = {}  # store vert data to not fetch for repeated points
+    if os.path.exists('vert.pkl'):
+        with open('vert.pkl', 'rb') as pickle_file:
+            elevation_cache = pickle.load(pickle_file)
+    folder_path = os.path.join(os.getcwd(), "vertdata")
+    graphcache='graph'+race_slug+'.gexf'
+    gpxcache = 'routes'+race_slug+'.gpx'
+    graph_path = os.path.join(folder_path, graphcache)
+    gpx_path = os.path.join(folder_path, gpxcache)
+    endpoint = gpxpy.gpx.GPXTrackPoint(latitude=lat, longitude=long,elevation=alt)
+    folder_path = os.path.join(os.getcwd(), "coursegpx")
+    basedata_path = os.path.join(folder_path, race_slug+".gpx")
+    with open(basedata_path, "r") as f:
         routegpx = gpxpy.parse(f)
-    if os.path.exists(gpxcache):
-        with open(gpxcache, "r") as f:
+    if os.path.exists(gpx_path):
+        with open(gpx_path, "r") as f:
             routegpx = gpxpy.parse(f)
-        if not os.path.exists(graphcache):
+        if not os.path.exists(graph_path):
             route_graph = routegraph(routegpx)
-            nx.write_gexf(route_graph, graphcache)
+            nx.write_gexf(route_graph, graph_path)
     else:
         routegpx.tracks.append(gpxpy.gpx.GPXTrack())
         routegpx.tracks[-1].segments.append(gpxpy.gpx.GPXTrackSegment())
         routegpx.tracks[-1].segments[-1].points.append(endpoint)
         routegpx=await assign_unique_ids(routegpx)
-        with open(gpxcache, "w") as f:
+        with open(gpx_path, "w") as f:
             f.write(routegpx.to_xml())
         route_graph = routegraph(routegpx)
-        nx.write_gexf(route_graph, graphcache)
+        nx.write_gexf(route_graph, graph_path)
     idcount=99999
     # Load race data from API (assuming this section is already defined in your script)
-    json_url = "https://live.anuinwardbound.com/api/2023/teams"
+    json_url = "https://live.anuinwardbound.com/api/"+race_slug+"/teams"
     response = requests.get(json_url)
     race_data = response.json()
     # Define drop times and other required variables
-    end_time_utc = datetime(2023, 10, 7, 8, 17)- timedelta(hours=11)
     teamtimedict = {}
     teams_data = []
-    route_graph = nx.read_gexf(graphcache)
+    route_graph = nx.read_gexf(graph_path)
     # Iterate over teams in race data
     for team_data in race_data.get("teams", []):
         team_name = team_data.get('name')
@@ -555,22 +567,23 @@ async def main():
             file_path = os.path.join(folder_path, str(divno)+".json")
             div_route_graph = route_graph
             if os.path.exists(file_path):
-                print(file_path)
                 with open(file_path, 'r') as file:
                     areas_data = json.load(file)
-                div_route_graph = remove_graph_points(routegraph,areas_data)
+                div_route_graph = remove_graph_points(route_graph,areas_data)
             points_data = team_data['tracker']['positions']
             tracker_id = team_data['tracker']['positions'][0]['trackerID']
             # Convert points_data to GPX asynchronously
             track_gpx = await points_to_gpx(points_data, team_name)
-            # Apply filters
-            track_gpx = filter_points_by_endtime(track_gpx, end_time_utc)
             # Perform time estimation
             teamguess = timeguess(track_gpx, routegpx,div_route_graph,endpoint,team_name)
             teamtimedict[team_name] = teamguess[0]
             # Convert GPX to JSON
             idcount, poslist = gpx_to_json(teamguess[1], team_name, tracker_id, idcount)
             team_data['tracker']['positions'] = poslist
+            keys_to_remove = ['tracker', 'description', 'divisionID', 'collegeID', 'raceID', 'dnfAt']
+            for key in keys_to_remove:
+                team_data.pop(key, None)
+            team_data['ETA']=teamguess[0].isoformat() + "Z"
             # Append modified team data
             teams_data.append(team_data)
 
@@ -578,9 +591,13 @@ async def main():
     race_data['teams'] = teams_data
 
     # Save race predictions to JSON file
-    with open('predictions.json', 'w') as json_file:
+    predictions_file = os.path.join(os.getcwd(), f'predictions_{race_slug}.json')
+    with open(predictions_file, 'w') as json_file:
         json.dump(race_data, json_file)
-
+    print(f"Predictions saved to {predictions_file}")
+    with open('vert.pkl', 'wb') as pickle_file:
+        pickle.dump(elevation_cache, pickle_file)
+    '''
     # Perform further data analysis and export to Excel
     df = pd.DataFrame(list(teamtimedict.items()), columns=['Name', 'Time'])
 
@@ -594,28 +611,25 @@ async def main():
     # Reset the index to make 'Number' a column
     df_pivot.reset_index(inplace=True)
     print(df_pivot)
-
     # Export to Excel
     with pd.ExcelWriter('racepredictions(2hrtimewindow).xlsx', engine='xlsxwriter') as writer:
         df_pivot.to_excel(writer, sheet_name='racepredictions', index=False)
-
         # Get the xlsxwriter workbook and worksheet objects
         workbook = writer.book
         worksheet = writer.sheets['racepredictions']
-
         # Define a custom number format for the 'Division' column (assuming it's in the first column)
         integer_format = workbook.add_format({'num_format': '0'})
-
         # Apply the integer format to the 'Division' column
         worksheet.set_column('A:A', None, integer_format)
-
         # Define a custom time format for other columns
         time_format = workbook.add_format({'num_format': 'h:mm:ss AM/PM'})
-
         # Apply the time format to columns 'B' and beyond (adjust 'W' as per your data)
-        worksheet.set_column('B:W', None, time_format)
-
+        worksheet.set_column('B:W', None, time_format)'''
 
 # Run the asynchronous main function
 if __name__ == "__main__":
-    asyncio.run(main())
+    year = "2023"
+    lat = -35.474536
+    long = 148.27584
+    alt = 393
+    asyncio.run(main(year, lat,long,alt))
