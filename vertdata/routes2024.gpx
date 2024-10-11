@@ -62944,9 +62944,17 @@
   </trk>
   <trk>
     <trkseg>
-      <trkpt lat="-35.474536" lon="148.9751">
-        <ele>912.0</ele>
-        <name>15562</name>
+      <trkpt lat="-35.58303" lon="148.9751">
+        <ele>1089.0</ele>
+        <name>15563</name>
+      </trkpt>
+    </trkseg>
+  </trk>
+  <trk>
+    <trkseg>
+      <trkpt lat="-35.58303" lon="148.9751">
+        <ele>1089.0</ele>
+        <name>15563</name>
       </trkpt>
     </trkseg>
   </trk>

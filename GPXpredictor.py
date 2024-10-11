@@ -584,12 +584,17 @@ async def main(race_slug,lat,long,alt):
     basedata_path = os.path.join(folder_path, race_slug+".gpx")
     ex_folder_path = os.path.join(os.getcwd(), "exclusions", race_slug)
     globalex_files = glob.glob(os.path.join(ex_folder_path, '*global*.geojson'))
-    print(globalex_files)
     with open(basedata_path, "r") as f:
         routegpx = gpxpy.parse(f)
+        routegpx.tracks.append(gpxpy.gpx.GPXTrack())
+        routegpx.tracks[-1].segments.append(gpxpy.gpx.GPXTrackSegment())
+        routegpx.tracks[-1].segments[-1].points.append(endpoint)
     if os.path.exists(gpx_path):
         with open(gpx_path, "r") as f:
             routegpx = gpxpy.parse(f)
+            routegpx.tracks.append(gpxpy.gpx.GPXTrack())
+            routegpx.tracks[-1].segments.append(gpxpy.gpx.GPXTrackSegment())
+            routegpx.tracks[-1].segments[-1].points.append(endpoint)
         if not os.path.exists(graph_path):
             route_graph = routegraph(routegpx)
             nx.write_gexf(route_graph, graph_path)
@@ -597,7 +602,6 @@ async def main(race_slug,lat,long,alt):
             if globalex_files:
                 for ex_file in globalex_files:
                     with open(ex_file, 'r') as file:
-                        print('found')
                         areas_data = json.load(file)
                     route_graph = remove_graph_points(route_graph, areas_data)
                 nx.write_gexf(route_graph, graph_path)
@@ -693,7 +697,7 @@ async def main(race_slug,lat,long,alt):
 # Run the asynchronous main function
 if __name__ == "__main__":
     year = "2024"
-    lat = -35.474536
+    lat = -35.58303
     long = 148.9751
-    alt = 1104
+    alt = 1111
     asyncio.run(main(year, lat,long,alt))

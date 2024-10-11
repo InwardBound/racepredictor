@@ -59,7 +59,7 @@ def schedule_predictions_for_2024():
     scheduler.add_job(
         lambda: asyncio.run(run_gpxpredictor(current_year, latitude, longitude, elevation)),
         'interval',
-        minutes=4.2,
+        minutes=4,
         start_date=start_time,
         end_date=end_time
     )
@@ -123,7 +123,7 @@ def get_graph_file(raceslug, filename):
 
     # Serve the HTML file with caching headers
     response = send_file(graphs_path, mimetype='text/html')
-    response.headers['Cache-Control'] = 'public, max-age=986400'  # Cache for a day
+    response.headers['Cache-Control'] = 'public, max-age=3333'  # Cache for an hourish
     return response
 endpoints_file_path = os.path.join(os.getcwd(), 'endpoints.txt')
 endpoints = load_endpoints(endpoints_file_path)
