@@ -123,7 +123,7 @@ def get_graph_file(raceslug, filename):
 
     # Serve the HTML file with caching headers
     response = send_file(graphs_path, mimetype='text/html')
-    response.headers['Cache-Control'] = 'public, max-age=3333'  # Cache for an hourish
+    response.headers['Cache-Control'] = 'public, max-age=33333'  # Cache for
     return response
 endpoints_file_path = os.path.join(os.getcwd(), 'endpoints.txt')
 endpoints = load_endpoints(endpoints_file_path)
