@@ -12,32 +12,78 @@ import asyncio
 import aiohttp
 import networkx as nx
 import itertools
-from shapely.geometry import Point, Polygon, LineString
+from shapely.geometry import Point, Polygon, LineString, MultiPolygon
 import pickle
+import glob
 
-def remove_graph_points(graph, areas):
-    # Load areas from JSON file
-    nodes_to_remove = set()
-    # Iterate through each area and mark nodes for removal
-    for area in areas:
-        if area['type'] == 'polygon':
-            polygon = Polygon(area['coordinates'])
-            for node in graph.nodes:
-                point = Point(graph.nodes[node]['longitude'], graph.nodes[node]['latitude'])
+def parse_node_label(label):
+    # Define the regex pattern to extract latitude and longitude
+    pattern = r'\[trkpt:([-\d.]+),([-\d.]+)@'
+
+    # Search for the pattern in the label string
+    match = re.search(pattern, label)
+
+    if match:
+        # Extract latitude and longitude
+        lat = float(match.group(1))
+        lon = float(match.group(2))
+        return lat, lon
+    else:
+        # Return None if the pattern does not match
+        return None, None
+
+def remove_graph_points(graph, areas_data):
+    tempgraph = graph.copy()
+    nodes_to_remove=set()
+
+    features = areas_data['features']
+    print(features)
+    for feature in features:
+        geometry = feature['geometry']
+        geom_type = geometry['type']
+        coordinates = geometry['coordinates']
+
+        if geom_type == 'Polygon':
+            # GeoJSON coordinates are in the form [ [ [lon, lat], ... ] ]
+            polygon = Polygon(coordinates[0])
+            for node in tempgraph.nodes:
+                node_data = tempgraph.nodes[node]
+                lat, lon, = parse_node_label(node_data['label'])
+                point = Point(lon, lat)
                 if polygon.contains(point):
                     nodes_to_remove.add(node)
-
-        elif area['type'] == 'line':
-            line = LineString(area['coordinates'])
-            threshold = area.get('threshold', 0.01)
-            for node in graph.nodes:
-                point = Point(graph.nodes[node]['longitude'], graph.nodes[node]['latitude'])
-                if point.distance(line) <= threshold:
+        elif geom_type == 'MultiPolygon':
+            # MultiPolygon is a list of polygons, so loop over each one
+            multipolygon = MultiPolygon([Polygon(polygon[0]) for polygon in coordinates])
+            for node in tempgraph.nodes:
+                node_data = tempgraph.nodes[node]
+                lat, lon = parse_node_label(node_data['label'])
+                point = Point(lon, lat)
+                if multipolygon.contains(point):
                     nodes_to_remove.add(node)
 
+        elif geom_type == 'LineString':
+            # GeoJSON coordinates for LineString are in the form [ [lon, lat], ... ]
+            line = LineString(coordinates)
+            threshold = feature.get('threshold', 0.01)
+            for node in tempgraph.nodes:
+                node_data = tempgraph.nodes[node]
+                lat, lon, = parse_node_label(node_data['label'])
+                point = Point(lon, lat)
+                if polygon.contains(point):
+                    nodes_to_remove.add(node)
+    print(nodes_to_remove)
     # Remove nodes and their associated edges
+    if len(nodes_to_remove) > 0:
+        tempgraph.remove_nodes_from(nodes_to_remove)
+    return tempgraph
+def remove_points_in_area(graph, min_latitude, max_latitude, min_longitude, max_longitude):
+    nodes_to_remove = [
+        node for node in graph.nodes
+        if min_latitude <= node.latitude <= max_latitude and min_longitude <= node.longitude <= max_longitude
+    ]
+    # Remove identified nodes and their associated edges
     graph.remove_nodes_from(nodes_to_remove)
-
     return graph
 async def assign_unique_ids(routegpx):
     counter = itertools.count(start=1)
@@ -66,8 +112,8 @@ def routegraph(route_data):
     # Add edges to the graph
     for i in range(len(nodelist)):
         point_i = nodelist[i]
-        for search_radius in [10,20,50,100,200,500,1000]:
-            edge_added=False
+        for search_radius in [10,20,30,50,100,200,500,1000]:
+            edge_added=0
             for j in range(i + 1, len(nodelist)):
                 point_j = nodelist[j]
                 # Calculate distance between point_i and point_j
@@ -89,8 +135,8 @@ def routegraph(route_data):
                     time_backward = distance / GAPtoSPD(2, min(max(-grade,-.3),.3))
                     G.add_edge(point_i, point_j, weight=time_forward)
                     G.add_edge(point_j, point_i, weight=time_backward)
-                    edge_added=True
-            if edge_added:
+                    edge_added+=1
+            if edge_added*search_radius > 100 or edge_added > 2:
                 break
     return G
 def string_to_trackpoint(s):
@@ -115,8 +161,7 @@ def find_optimal_route(start_point_id, end_point_id, graph):
             start_point = node
         elif str(node) == str(end_point_id):
             end_point = node
-    if start_point is None or end_point is None:
-        raise ValueError("Start or end point IDs not found in the graph.")
+
 
     # Find the optimal path using shortest path algorithm
     # Create a GPX object to store the optimal route
@@ -137,14 +182,7 @@ def find_optimal_route(start_point_id, end_point_id, graph):
     return gpx_segment.points
 
 
-def remove_points_in_area(graph, min_latitude, max_latitude, min_longitude, max_longitude):
-    nodes_to_remove = [
-        node for node in graph.nodes
-        if min_latitude <= node.latitude <= max_latitude and min_longitude <= node.longitude <= max_longitude
-    ]
-    # Remove identified nodes and their associated edges
-    graph.remove_nodes_from(nodes_to_remove)
-    return graph
+
 def get_nearest_location(point, graph):
     # Initialize variables to store nearest information
     nearest_node = None
@@ -361,7 +399,13 @@ def infer_speed(gpx):
 def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
     gapdf = pd.DataFrame(columns=['Time', "GAP",'Duration'])
     gpx = teaminfo
-    gpx = filter_gpx(gpx, 0, 30)  # Top speed faster than a 2-hour marathon
+    gpx = filter_gpx(gpx, 1, 30)  # Top speed faster than a 2-hour marathon
+    if len(gpx.tracks) == 0:
+        return ["",gpx]
+    if len(gpx.tracks[0].segments) == 0:
+        return ["",gpx]
+    if len(gpx.tracks[0].segments[0].points) == 0:
+        return ["", gpx]
     routeguess = gpxpy.gpx.GPX()  # Corrected route GPX object
     for track in gpx.tracks:
         for segment in track.segments:
@@ -423,8 +467,14 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
                     else:
                         routeguess.tracks[0].segments[0].points.extend(segmentinfo.tracks[0].segments[0].points)
     # Remove likely errors from GPX
-    routeguess = filter_gpx(routeguess, 0, 20)  # Top speed faster than a 2-hour marathon
+    routeguess = filter_gpx(routeguess, 1, 20)  # Top speed faster than a 2-hour marathon
     routeguess = distance_filter_with_future_points(routeguess, 2000, 5)  # Try to remove bus trips automatically
+    if len(routeguess.tracks) == 0:
+        return ["",routeguess]
+    if len(routeguess.tracks[0].segments) == 0:
+        return ["",routeguess]
+    if len(routeguess.tracks[0].segments[0].points) == 0:
+        return ["",routeguess]
     timecount=0
     for track in routeguess.tracks:
         for segment in track.segments:
@@ -531,6 +581,9 @@ async def main(race_slug,lat,long,alt):
     endpoint = gpxpy.gpx.GPXTrackPoint(latitude=lat, longitude=long,elevation=alt)
     folder_path = os.path.join(os.getcwd(), "coursegpx")
     basedata_path = os.path.join(folder_path, race_slug+".gpx")
+    ex_folder_path = os.path.join(os.getcwd(), "exclusions", race_slug)
+    globalex_files = glob.glob(os.path.join(ex_folder_path, '*global*.geojson'))
+    print(globalex_files)
     with open(basedata_path, "r") as f:
         routegpx = gpxpy.parse(f)
     if os.path.exists(gpx_path):
@@ -539,6 +592,14 @@ async def main(race_slug,lat,long,alt):
         if not os.path.exists(graph_path):
             route_graph = routegraph(routegpx)
             nx.write_gexf(route_graph, graph_path)
+            route_graph = nx.read_gexf(graph_path)
+            if globalex_files:
+                for ex_file in globalex_files:
+                    with open(ex_file, 'r') as file:
+                        print('found')
+                        areas_data = json.load(file)
+                    route_graph = remove_graph_points(route_graph, areas_data)
+                nx.write_gexf(route_graph, graph_path)
     else:
         routegpx.tracks.append(gpxpy.gpx.GPXTrack())
         routegpx.tracks[-1].segments.append(gpxpy.gpx.GPXTrackSegment())
@@ -548,28 +609,55 @@ async def main(race_slug,lat,long,alt):
             f.write(routegpx.to_xml())
         route_graph = routegraph(routegpx)
         nx.write_gexf(route_graph, graph_path)
+        route_graph = nx.read_gexf(graph_path)
+        if globalex_files:
+            for ex_file in globalex_files:
+                with open(ex_file, 'r') as file:
+                    print('found')
+                    areas_data = json.load(file)
+                route_graph = remove_graph_points(route_graph, areas_data)
+            nx.write_gexf(route_graph, graph_path)
     idcount=99999
     # Load race data from API (assuming this section is already defined in your script)
     json_url = "https://live.anuinwardbound.com/api/"+race_slug+"/teams"
     response = requests.get(json_url)
     race_data = response.json()
-    # Define drop times and other required variables
     teamtimedict = {}
     teams_data = []
     route_graph = nx.read_gexf(graph_path)
+    for divno in range(1,8):
+        divex_files = glob.glob(os.path.join(ex_folder_path, f'*{divno}*.geojson'))
+        divex_graph_path = os.path.join(ex_folder_path, str(divno) + ".gexf")
+        div_route_graph = route_graph.copy()
+        if divex_files:
+            if os.path.exists(divex_graph_path):
+                div_route_graph = nx.read_gexf(divex_graph_path)
+            else:
+                for divex_file in divex_files:
+                    print(divex_file)
+                    with open(divex_file, 'r') as file:
+                        areas_data = json.load(file)
+                    div_route_graph = remove_graph_points(div_route_graph, areas_data)
+                nx.write_gexf(div_route_graph, divex_graph_path)
     # Iterate over teams in race data
     for team_data in race_data.get("teams", []):
         team_name = team_data.get('name')
         if len(team_data['tracker']['positions'])>0 and team_data['dnfAt'] is None:
             # Extract the point data for this team
             divno = get_divnumber(team_name)
-            folder_path = os.path.join(os.getcwd(), "exclusions")
-            file_path = os.path.join(folder_path, str(divno)+".json")
-            div_route_graph = route_graph
-            if os.path.exists(file_path):
-                with open(file_path, 'r') as file:
-                    areas_data = json.load(file)
-                div_route_graph = remove_graph_points(route_graph,areas_data)
+            divex_files = glob.glob(os.path.join(ex_folder_path, f'*{divno}*.geojson'))
+            divex_graph_path = os.path.join(ex_folder_path, str(divno)+".gexf")
+            div_route_graph = route_graph.copy()
+            if divex_files:
+                if os.path.exists(divex_graph_path):
+                    div_route_graph = nx.read_gexf(divex_graph_path)
+                else:
+                    for divex_file in divex_files:
+                        print(divex_file)
+                        with open(divex_file, 'r') as file:
+                            areas_data = json.load(file)
+                        div_route_graph = remove_graph_points(div_route_graph,areas_data)
+                    nx.write_gexf(div_route_graph, divex_graph_path)
             points_data = team_data['tracker']['positions']
             tracker_id = team_data['tracker']['positions'][0]['trackerID']
             # Convert points_data to GPX asynchronously
@@ -583,7 +671,10 @@ async def main(race_slug,lat,long,alt):
             keys_to_remove = ['tracker', 'description', 'divisionID', 'collegeID', 'raceID', 'dnfAt']
             for key in keys_to_remove:
                 team_data.pop(key, None)
-            team_data['ETA']=teamguess[0].isoformat() + "Z"
+            if "" != teamguess[0]:
+                team_data['ETA'] = teamguess[0].isoformat() + "Z"
+            else:
+                team_data['ETA'] = None
             # Append modified team data
             teams_data.append(team_data)
 
@@ -597,39 +688,11 @@ async def main(race_slug,lat,long,alt):
     print(f"Predictions saved to {predictions_file}")
     with open('vert.pkl', 'wb') as pickle_file:
         pickle.dump(elevation_cache, pickle_file)
-    '''
-    # Perform further data analysis and export to Excel
-    df = pd.DataFrame(list(teamtimedict.items()), columns=['Name', 'Time'])
-
-    # Extract the 'Team' names (remove all digits)
-    df['Team'] = df['Name'].apply(lambda x: remove_numbers(x))
-    # Extract the 'Number' from the 'Name' column
-    df['Division'] = df['Name'].str.extract(r'(\d+)').fillna(1).astype(int)
-    # Group by 'Team' and aggregate 'Time' values into a list
-    grouped = df.groupby('Team')['Time'].agg(list).reset_index()
-    df_pivot = df.pivot(index='Division', columns='Team', values='Time')
-    # Reset the index to make 'Number' a column
-    df_pivot.reset_index(inplace=True)
-    print(df_pivot)
-    # Export to Excel
-    with pd.ExcelWriter('racepredictions(2hrtimewindow).xlsx', engine='xlsxwriter') as writer:
-        df_pivot.to_excel(writer, sheet_name='racepredictions', index=False)
-        # Get the xlsxwriter workbook and worksheet objects
-        workbook = writer.book
-        worksheet = writer.sheets['racepredictions']
-        # Define a custom number format for the 'Division' column (assuming it's in the first column)
-        integer_format = workbook.add_format({'num_format': '0'})
-        # Apply the integer format to the 'Division' column
-        worksheet.set_column('A:A', None, integer_format)
-        # Define a custom time format for other columns
-        time_format = workbook.add_format({'num_format': 'h:mm:ss AM/PM'})
-        # Apply the time format to columns 'B' and beyond (adjust 'W' as per your data)
-        worksheet.set_column('B:W', None, time_format)'''
 
 # Run the asynchronous main function
 if __name__ == "__main__":
-    year = "2023"
+    year = "2024"
     lat = -35.474536
-    long = 148.27584
-    alt = 393
+    long = 148.9751
+    alt = 1104
     asyncio.run(main(year, lat,long,alt))

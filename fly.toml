@@ -1,18 +1,20 @@
-# fly.toml app configuration file generated for racepredictor-1 on 2024-08-17T19:30:16+10:00
+# fly.toml app configuration file generated for ib-predictor on 2024-10-10T02:49:30+11:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'racepredictor-1'
+app = 'ib-predictor'
 primary_region = 'syd'
-console_command = '/code/manage.py shell'
 
 [build]
+  dockerfile = 'Dockerfile'
 
 [deploy]
-  release_command = 'python manage.py migrate --noinput'
+  # The release_command is not needed for a continuous-running Flask app.
+  # It is safe to remove this line.
 
 [env]
+  NODE_OPTIONS = '--max-old-space-size=4096'
   PORT = '8000'
 
 [http_service]
@@ -20,13 +22,12 @@ console_command = '/code/manage.py shell'
   force_https = true
   auto_stop_machines = 'stop'
   auto_start_machines = true
-  min_machines_running = 0
-  processes = ['app']
+  min_machines_running = 1
 
 [[vm]]
-  memory = '1gb'
+  memory = '8gb'
   cpu_kind = 'shared'
-  cpus = 1
+  cpus = 4
 
 [[statics]]
   guest_path = '/code/static'

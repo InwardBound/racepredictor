@@ -1,18 +1,17 @@
-# Use the official Python image.
-# https://hub.docker.com/_/python
+# Use an official Python runtime as a parent image
 FROM python:3.10-slim
 
-# Set the working directory.
-WORKDIR /app
+# Set the working directory in the container
+WORKDIR /code
 
-# Copy the current directory contents into the container at /app.
-COPY . /app
+# Copy the current directory contents into the container at /code
+COPY . /code
 
-# Install any needed packages specified in requirements.txt.
-RUN pip install --no-cache-dir -r requirements.txt
+# Install any needed packages specified in requirements.txt
+RUN pip install -r requirements.txt
 
-# Make port 8080 available to the world outside this container.
-EXPOSE 8080
+# Make port 8000 available to the world outside this container
+EXPOSE 8000
 
-# Run app.py when the container launches.
+# Run app.py when the container launches
 CMD ["python", "app.py"]
