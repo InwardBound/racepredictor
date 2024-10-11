@@ -413,6 +413,7 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
                 point_i = segment.points[w]
                 point_i1 = segment.points[w+1]
                 time = point_i.time_difference(point_i1)
+                distance = point_i1.distance_2d(point_i)
                 if time != 0:
                     locinfoi1 = routeinfo.get_nearest_location(point_i1)  # Get closest point and track based on the second point
                     p_i1 = locinfoi1.point_no
@@ -441,11 +442,11 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
                         segmentinfo.tracks[0].segments[0].points[0].time = point_i.time
                         segmentinfo.tracks[0].segments[0].points[-1].time = point_i1.time
                         speed = segmentinfo.length_3d() / time  # Need to adjust for GAP
-                    if speed >7:#assume dem error
-                        speed = segmentinfo.length_2d() / time
+                        if speed >7:#assume dem error
+                            speed = segmentinfo.length_2d() / time
                 else:
                     speed = 0
-                if speed != 0:  # No point if same point
+                if distance != 0:  # No point if same point
                     for t in segmentinfo.tracks:
                         for s in t.segments:
                             previous_time = None
