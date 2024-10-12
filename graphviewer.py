@@ -244,7 +244,7 @@ def visualize_combined_shortest_path(G,  endpoint,start_point,title, race_slug):
     folder_path = os.path.join(os.getcwd(), "graphs", race_slug)
     fig.write_html(os.path.join(folder_path,title+".html"))
 
-race_slug = '2024'
+race_slug = '2022'
 folder_path = os.path.join(os.getcwd(), "vertdata")
 graphcache = 'graph' + race_slug + '.gexf'
 gpxcache = 'routes' + race_slug + '.gpx'

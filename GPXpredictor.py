@@ -696,8 +696,8 @@ async def main(race_slug,lat,long,alt):
 
 # Run the asynchronous main function
 if __name__ == "__main__":
-    year = "2024"
-    lat = -35.58303
-    long = 148.9751
-    alt = 1111
+    year = "2023"
+    lat = -35.473497
+    long = 148.2769721
+    alt = 370
     asyncio.run(main(year, lat,long,alt))

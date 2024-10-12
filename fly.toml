@@ -25,9 +25,9 @@ primary_region = 'syd'
   min_machines_running = 1
 
 [[vm]]
-  memory = '8gb'
+  memory = '512mb'
   cpu_kind = 'shared'
-  cpus = 4
+  cpus = 1
 
 [[statics]]
   guest_path = '/code/static'
