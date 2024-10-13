@@ -54,7 +54,7 @@ def schedule_predictions_for_2024():
         return
 
     start_time = datetime(2024, 10, 11, 20, 0, 0, tzinfo=ZoneInfo('Australia/Sydney'))
-    end_time = start_time + timedelta(hours=22222)
+    end_time = start_time + timedelta(hours=24)
     print(start_time)
     scheduler.add_job(
         lambda: asyncio.run(run_gpxpredictor(current_year, latitude, longitude, elevation)),
@@ -123,7 +123,7 @@ def get_graph_file(raceslug, filename):
 
     # Serve the HTML file with caching headers
     response = send_file(graphs_path, mimetype='text/html')
-    response.headers['Cache-Control'] = 'public, max-age=33333'  # Cache for
+    response.headers['Cache-Control'] = 'public, max-age=133333'  # Cache for
     return response
 endpoints_file_path = os.path.join(os.getcwd(), 'endpoints.txt')
 endpoints = load_endpoints(endpoints_file_path)

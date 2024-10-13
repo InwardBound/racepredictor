@@ -508,11 +508,8 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
                     finishedroute.tracks[-1].segments = finishedroute.tracks[-1].segments[:locsegment + 1]
                     finishedroute.tracks[-1].segments[-1].points = finishedroute.tracks[-1].segments[-1].points[:locpoint + 1]
                     lasttime = point_i1.time
-
-                    with open(filepath, "w") as f:
-                        f.write(finishedroute.to_xml())
-                    finishedroute.simplify()
-                    return [lasttime,finishedroute]  # Return the complete predicted route as GPX
+                    routeguess = finishedroute  # Return the complete predicted route as GPX
+                    break
     currentpoint = routeguess.tracks[-1].segments[-1].points[-1]
     recentdf = gapdf[gapdf['Duration'] > max(gapdf['Duration']) - 7200]#only consider most recent 2hrs of running
     NetGAP = average(recentdf['GAP'], weights=recentdf['Time'])
@@ -527,9 +524,9 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
     pathtofinish.tracks[0].segments.append(gpxpy.gpx.GPXTrackSegment())
     pathtofinish.tracks[0].segments[0].points = [currentpoint] + find_optimal_route(cp.name,ep.name, graph)
     nettime = routeguess.get_duration()
-    filepath = os.path.join(folderpath, teamname + "(finished).gpx")
+    '''filepath = os.path.join(folderpath, teamname + ".gpx")
     with open(filepath, "w") as f:
-        f.write(routeguess.to_xml())
+        f.write(routeguess.to_xml())'''
     for track in pathtofinish.tracks:
         for segment in track.segments:
             for point_i, point_i1 in zip(segment.points, segment.points[1:]):
@@ -559,8 +556,6 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
         lasttime = routeguess.tracks[-1].segments[-1].points[-1].time
 
     routeguess = infer_speed(routeguess)
-    routeguess.simplify()
-    routeguess.simplify()
     return [lasttime,routeguess] #convert back to aedt
 
 
@@ -655,7 +650,7 @@ async def main(race_slug,lat,long,alt):
     # Iterate over teams in race data
     for team_data in race_data.get("teams", []):
         team_name = team_data.get('name')
-        if len(team_data['tracker']['positions'])>0 and team_data['dnfAt'] is None:
+        if len(team_data['tracker']['positions'])>0:
             # Extract the point data for this team
             divno = get_divnumber(team_name)
             divex_files = glob.glob(os.path.join(ex_folder_path, f'*{divno}*.geojson'))
