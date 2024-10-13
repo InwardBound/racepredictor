@@ -397,6 +397,8 @@ def infer_speed(gpx):
                 previous_point = point
     return gpx
 def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
+    folderpath = os.path.join(os.getcwd(), "teams")
+    filepath = os.path.join(folderpath, teamname + ".gpx")
     gapdf = pd.DataFrame(columns=['Time', "GAP",'Duration'])
     gpx = teaminfo
     gpx = filter_gpx(gpx, 1, 30)  # Top speed faster than a 2-hour marathon
@@ -506,6 +508,9 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
                     finishedroute.tracks[-1].segments = finishedroute.tracks[-1].segments[:locsegment + 1]
                     finishedroute.tracks[-1].segments[-1].points = finishedroute.tracks[-1].segments[-1].points[:locpoint + 1]
                     lasttime = point_i1.time
+
+                    with open(filepath, "w") as f:
+                        f.write(finishedroute.to_xml())
                     finishedroute.simplify()
                     return [lasttime,finishedroute]  # Return the complete predicted route as GPX
     currentpoint = routeguess.tracks[-1].segments[-1].points[-1]
@@ -522,6 +527,9 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
     pathtofinish.tracks[0].segments.append(gpxpy.gpx.GPXTrackSegment())
     pathtofinish.tracks[0].segments[0].points = [currentpoint] + find_optimal_route(cp.name,ep.name, graph)
     nettime = routeguess.get_duration()
+    filepath = os.path.join(folderpath, teamname + "(finished).gpx")
+    with open(filepath, "w") as f:
+        f.write(routeguess.to_xml())
     for track in pathtofinish.tracks:
         for segment in track.segments:
             for point_i, point_i1 in zip(segment.points, segment.points[1:]):

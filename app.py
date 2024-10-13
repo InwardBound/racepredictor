@@ -54,7 +54,7 @@ def schedule_predictions_for_2024():
         return
 
     start_time = datetime(2024, 10, 11, 20, 0, 0, tzinfo=ZoneInfo('Australia/Sydney'))
-    end_time = start_time + timedelta(hours=24)
+    end_time = start_time + timedelta(hours=22222)
     print(start_time)
     scheduler.add_job(
         lambda: asyncio.run(run_gpxpredictor(current_year, latitude, longitude, elevation)),

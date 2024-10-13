@@ -86,8 +86,8 @@ def visualize_optimal_route_graph(G, endpoint, title, dps):
         marker=dict(
             size=node_size,
             color=node_color,
-            colorscale='rdylgn',  # Use a heatmap color scale (green to red)
-            reversescale=True,
+            colorscale='viridis',  # Use a heatmap color scale (green to red)
+            reversescale=False,
             colorbar=dict(
                 title="Time to Endpoint (assuming 2m/s Gradient Adjusted Speed)",  # Label for the color scal
                 titleside='right',
@@ -187,8 +187,8 @@ def visualize_combined_shortest_path(G,  endpoint,start_point,title, race_slug):
         marker=dict(
             size=node_size,
             color=node_color_log,  # Use the log-transformed values for coloring
-            colorscale='rdylgn',  # Use a heatmap color scale (green to red)
-            reversescale=True,  # Reverse the color scale
+            colorscale='viridis',  # Use a heatmap color scale (green to red)
+            reversescale=False,  # Reverse the color scale
             colorbar=dict(
                 title="Combined Time (Start -> Node -> End)",  # Actual time in the title
                 titleside='right',
@@ -244,7 +244,7 @@ def visualize_combined_shortest_path(G,  endpoint,start_point,title, race_slug):
     folder_path = os.path.join(os.getcwd(), "graphs", race_slug)
     fig.write_html(os.path.join(folder_path,title+".html"))
 
-race_slug = '2022'
+race_slug = '2023'
 folder_path = os.path.join(os.getcwd(), "vertdata")
 graphcache = 'graph' + race_slug + '.gexf'
 gpxcache = 'routes' + race_slug + '.gpx'
