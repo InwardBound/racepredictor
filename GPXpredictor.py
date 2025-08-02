@@ -479,25 +479,37 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
     if len(routeguess.tracks[0].segments[0].points) == 0:
         return ["",routeguess]
     timecount=0
+    bushbashtime =0
+    closedist = 500
     for track in routeguess.tracks:
         for segment in track.segments:
             for i in range(len(segment.points) - 1):
                 point_i = segment.points[i]
                 point_i1 = segment.points[i + 1]
+                i1close = routeinfo.tracks[t_i1].segments[s_i1].points[p_i1]
                 time = point_i.time_difference(point_i1)
                 timecount += time
                 vert = point_i1.elevation - point_i.elevation
                 dist = point_i.distance_2d(point_i1)
+                closedist += dist
+                if closedist >500:
+                    closepoint = routeinfo.get_nearest_location(point_i1)
+                    p_i1 = closepoint.point_no
+                    s_i1 = closepoint.segment_no
+                    t_i1 = closepoint.track_no
+                    closedist = point_i1.distance_3d(i1close)
                 speed=0
                 if time>0:
                     speed = point_i.distance_3d(point_i1)/time
                 if speed>7 and time>0:#if really fast assume dem error
                     speed=dist/time
-                if dist != 0 and speed < 7:
+                if dist != 0 and speed < 7 and closedist<500: #closedist check to see if we are bushbashing
                     grade = vert / dist
                     GAPspeed = SpdtoGAP(speed, max(min(grade,.3),-.3))#limits grade to .3 as gap starts go weird when really steep
                     inputdf = [time, GAPspeed, timecount]
                     gapdf.loc[len(gapdf)] = inputdf
+                if closedist >= 500:
+                    bushbashtime += time
                 if point_i1.distance_2d(endpoint) < 500:
                     currentpointinfo = routeguess.get_nearest_location(point_i1)
                     locpoint = currentpointinfo.point_no
@@ -511,7 +523,7 @@ def timeguess(teaminfo, routeinfo, graph,endpoint,teamname):
                     routeguess = finishedroute  # Return the complete predicted route as GPX
                     break
     currentpoint = routeguess.tracks[-1].segments[-1].points[-1]
-    recentdf = gapdf[gapdf['Duration'] > max(gapdf['Duration']) - 7200]#only consider most recent 2hrs of running
+    recentdf = gapdf[gapdf['Duration'] > max(gapdf['Duration']) - 7200- bushbashtime]#only consider most recent 2hrs of running that ain't bushbashing
     NetGAP = average(recentdf['GAP'], weights=recentdf['Time'])
     currentpointinfo = routeinfo.get_nearest_location(currentpoint)  # Get the closest point to the current point
     p_i = currentpointinfo.point_no
